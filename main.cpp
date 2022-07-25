@@ -341,321 +341,659 @@ int main(int argc, char* argv[])
         cout << "Bone " << a + 1 << ": " << bone_name << ", unk_1: " << bone_integer << endl;
     }
 
-    // Step 3: Mesh
+    // Step 3: Mesh and Animations
     {
-        uint32_t offset_1 = Binary::get_uint32(gxx, section_c + 0x10);
-        uint32_t offset_2 = Binary::get_uint32(gxx, offset_1);
-        uint32_t gpu_offset = Binary::get_uint32(gxx, offset_2);
+        uint32_t block_pointer = Binary::get_uint32(gxx, section_c + 0x10);
+        uint32_t blocks = Binary::get_uint32(gxx, section_c + 0x14);
 
-        uint32_t buffer = 0x0;
-        buffer = Binary::get_uint32(gxx, gpu_offset);
+        cout << "Blocks start at: 0x" << hex << block_pointer << dec << ", " << blocks << " blocks" << endl;
 
-        vector<uint32_t> unkownInstr;
-
-        uint32_t vertexAddr;
-        uint32_t indexAddr;
-        vector<uint32_t> returnAddr;
-        bool end = false;
-        
-        while (!end)
+        for (int i = 0; i < blocks; i++)
         {
-            ///We go over the most crucial GPU instructions for us
-            gpu_offset += 0x4;
+            uint32_t anim_pointer = Binary::get_uint32(gxx, block_pointer + (i * 0x10));
+            uint32_t frames = Binary::get_uint32(gxx, block_pointer + (i * 0x10) + 0x4);
+            float framerate = Binary::get_float(gxx, block_pointer + (i * 0x10) + 0x8);
+            uint32_t frameloop = Binary::get_float(gxx, block_pointer + (i * 0x10) + 0xC);
 
-            switch (buffer >> 24)
+            uint32_t anim_data = Binary::get_uint32(gxx, anim_pointer);
+
+            cout << "Anim ptr: 0x" << std::hex << anim_pointer << " (anim data at: 0x" << anim_data << std::dec << "), Frames: " << frames << " Loop: " << frameloop << " Framerate: " << framerate << endl;
+
             {
-            default:
-            {
-                uint32_t data = buffer >> 24;
-                //cout << "---UNKNOWN: " << hex << "0x" << data << dec << endl;
-                if (!std::count(unkownInstr.begin(), unkownInstr.end(), data))
+                uint32_t gpu_offset = anim_data;
+
+                uint32_t buffer = 0x0;
+                buffer = Binary::get_uint32(gxx, gpu_offset);
+
+                vector<uint32_t> unkownInstr;
+
+                uint32_t vertexAddr;
+                uint32_t indexAddr;
+                vector<uint32_t> returnAddr;
+                bool end = false;
+
+                while (!end)
                 {
-                    unkownInstr.push_back(data);
+                    ///We go over the most crucial GPU instructions for us
+                    gpu_offset += 0x4;
+
+                    switch (buffer >> 24)
+                    {
+                    default:
+                    {
+                        uint32_t data = buffer >> 24;
+                        //cout << "---UNKNOWN: " << hex << "0x" << data << dec << endl;
+                        if (!std::count(unkownInstr.begin(), unkownInstr.end(), data))
+                        {
+                            unkownInstr.push_back(data);
+                        }
+                    }
+
+                    case GE_NOP:
+                    {
+                        uint32_t data = buffer << 8 >> 8;
+                        if (data != 0)
+                        {
+                            cout << hex << "NOP: data= 0x" << data << dec << endl;
+                        }
+                        else
+                        {
+                            cout << "NOP" << endl;
+                        }
+                        break;
+                    }
+
+                    case GE_VADDR:
+                    {
+                        uint32_t data = buffer << 8 >> 8;
+                        if (data != 0)
+                        {
+                            vertexAddr = data;
+                            cout << "VADDR: " << data << endl;
+                        }
+                        break;
+                    }
+
+                    case GE_IADDR:
+                    {
+                        uint32_t data = buffer << 8 >> 8;
+                        if (data != 0)
+                        {
+                            indexAddr = data;
+                            cout << "IADDR: " << data << endl;
+                        }
+                        break;
+                    }
+
+                    case GE_PRIM:
+                    {
+                        uint32_t count = buffer & 0xFFFF;
+                        uint32_t type = (buffer >> 16) & 7;
+
+                        static const char* types[8] =
+                        {
+                            "POINTS",
+                            "LINES",
+                            "LINE_STRIP",
+                            "TRIANGLES",
+                            "TRIANGLE_STRIP",
+                            "TRIANGLE_FAN",
+                            "RECTANGLES",
+                            "CONTINUE_PREVIOUS",
+                        };
+
+                        cout << "DRAW PRIM \"" << (type < 7 ? types[type] : "INVALID") << "\" count= " << count << " vaddr= " << vertexAddr << endl;
+
+                        break;
+                    }
+
+                    case GE_JUMP:
+                    {
+                        uint32_t addr = buffer << 8 >> 8;
+                        returnAddr.push_back(gpu_offset);
+                        gpu_offset = addr;
+                        cout << "Jump to: " << hex << "0x" << addr << dec << endl;
+                        break;
+                    }
+                    case GE_CALL:
+                    {
+                        uint32_t addr = buffer << 8 >> 8;
+                        returnAddr.push_back(gpu_offset);
+                        gpu_offset = addr;
+                        cout << "Call to: " << hex << "0x" << addr << dec << endl;
+                        break;
+                    }
+                    case GE_RET:
+                    {
+                        if (returnAddr.size() > 0)
+                        {
+                            uint32_t addr = returnAddr.back();
+                            returnAddr.pop_back();
+                            gpu_offset = addr;
+                            cout << "Return to: " << hex << "0x" << addr << dec << endl;
+                        }
+                        else
+                        {
+                            end = true;
+                        }
+
+
+                        break;
+                    }
+
+                    case GE_BASE:
+                    {
+                        uint32_t addr = buffer << 8 >> 8;
+                        cout << "Set base addr to: " << hex << "0x" << addr << dec << endl;
+                        break;
+                    }
+
+                    case GE_VERTEXTYPE:
+                    {
+                        uint32_t op = buffer;
+                        cout << "SetVertexType: ";
+
+                        bool through = (op & GE_VTYPE_THROUGH_MASK) == GE_VTYPE_THROUGH;
+                        int tc = (op & GE_VTYPE_TC_MASK) >> GE_VTYPE_TC_SHIFT;
+                        int col = (op & GE_VTYPE_COL_MASK) >> GE_VTYPE_COL_SHIFT;
+                        int nrm = (op & GE_VTYPE_NRM_MASK) >> GE_VTYPE_NRM_SHIFT;
+                        int pos = (op & GE_VTYPE_POS_MASK) >> GE_VTYPE_POS_SHIFT;
+                        int weight = (op & GE_VTYPE_WEIGHT_MASK) >> GE_VTYPE_WEIGHT_SHIFT;
+                        int weightCount = ((op & GE_VTYPE_WEIGHTCOUNT_MASK) >> GE_VTYPE_WEIGHTCOUNT_SHIFT) + 1;
+                        int morphCount = (op & GE_VTYPE_MORPHCOUNT_MASK) >> GE_VTYPE_MORPHCOUNT_SHIFT;
+                        int idx = (op & GE_VTYPE_IDX_MASK) >> GE_VTYPE_IDX_SHIFT;
+
+                        static const char* colorNames[] = {
+                            NULL,
+                            "unsupported1",
+                            "unsupported2",
+                            "unsupported3",
+                            "BGR 565",
+                            "ABGR 1555",
+                            "ABGR 4444",
+                            "ABGR 8888",
+                        };
+                        static const char* typeNames[] = {
+                            NULL,
+                            "u8",
+                            "u16",
+                            "float",
+                        };
+                        static const char* typeNamesI[] = {
+                            NULL,
+                            "u8",
+                            "u16",
+                            "u32",
+                        };
+                        static const char* typeNamesS[] = {
+                            NULL,
+                            "s8",
+                            "s16",
+                            "float",
+                        };
+
+                        if (through)
+                            cout << "through, ";
+                        if (typeNames[tc])
+                            cout << typeNames[tc] << " texcoords, ";
+
+                        if (colorNames[col])
+                            cout << colorNames[col] << " colors, ";
+
+                        if (typeNames[nrm])
+                            cout << typeNamesS[nrm] << " normals, ";
+
+                        if (typeNames[pos])
+                            cout << typeNamesS[pos] << " positions, ";
+
+                        if (typeNames[weight])
+                            cout << typeNames[weight] << " weights " << weightCount << ", ";
+                        else if (weightCount > 1)
+                            cout << "unknown weights (%d), " << weightCount;
+
+                        if (morphCount > 0)
+                            cout << morphCount << " morphs, ";
+
+                        if (typeNamesI[idx])
+                            cout << typeNamesI[idx] << " indexes";
+
+                        cout << endl;
+
+                        break;
+                    }
+
+                    case GE_TEXTUREMAPENABLE:
+                    {
+                        uint32_t flag = buffer << 8 >> 8;
+                        cout << "Texture map enable: " << hex << flag << dec << endl;
+                        break;
+                    }
+
+                    case GE_WORLDMATRIXNUMBER:
+                    {
+                        /* PPSSPP Source
+                        if (data & ~0xF)
+                            snprintf(buffer, bufsize, "World # %i (extra %x)", data & 0xF, data);
+                        else
+                            snprintf(buffer, bufsize, "World # %i", data & 0xF);
+                        */
+                        uint32_t f = buffer << 8;
+
+                        cout.setf(ios::fixed, ios::floatfield);
+                        cout.setf(ios::showpoint);
+                        cout << "World: # " << (int)Binary::u32_to_float(f) << endl;
+
+                        break;
+                    }
+
+                    case GE_WORLDMATRIXDATA:
+                    {
+                        uint32_t f = buffer << 8;
+
+                        cout.setf(ios::fixed, ios::floatfield);
+                        cout.setf(ios::showpoint);
+                        cout << "World matrix set: " << Binary::u32_to_float(f) << endl;
+
+                        break;
+                    }
+
+                    case GE_TEXSCALEU:
+                    {
+                        uint32_t f = buffer << 8;
+
+                        cout.setf(ios::fixed, ios::floatfield);
+                        cout.setf(ios::showpoint);
+                        cout << "Texture U scale: " << Binary::u32_to_float(f) << endl;
+
+                        break;
+                    }
+
+                    case GE_TEXSCALEV:
+                    {
+                        uint32_t f = buffer << 8;
+
+                        cout.setf(ios::fixed, ios::floatfield);
+                        cout.setf(ios::showpoint);
+                        cout << "Texture V scale: " << Binary::u32_to_float(f) << endl;
+
+                        break;
+                    }
+
+                    case GE_TEXOFFSETU:
+                    {
+                        uint32_t f = buffer << 8;
+
+                        cout.setf(ios::fixed, ios::floatfield);
+                        cout.setf(ios::showpoint);
+                        cout << "Texture U offset: " << Binary::u32_to_float(f) << endl;
+
+                        break;
+                    }
+
+                    case GE_TEXOFFSETV:
+                    {
+                        uint32_t f = buffer << 8;
+
+                        cout.setf(ios::fixed, ios::floatfield);
+                        cout.setf(ios::showpoint);
+                        cout << "Texture V offset: " << Binary::u32_to_float(f) << endl;
+
+                        break;
+                    }
+
+                    case GE_MATERIALAMBIENT:
+                    {
+                        uint32_t color = buffer << 8 >> 8;
+                        cout << "Material ambient color: 0x" << hex << color << dec << endl;
+                    }
+                    case GE_MATERIALALPHA:
+                    {
+                        uint32_t color = buffer << 8 >> 8;
+
+                        cout.setf(ios::fixed, ios::floatfield);
+                        cout.setf(ios::showpoint);
+                        cout << "Material alpha color: 0x" << hex << color << dec << endl;
+
+                        break;
+                    }
+
+                    }
+
+
+                    buffer = Binary::get_uint32(gxx, gpu_offset);
                 }
-            }
-
-            case GE_NOP:
-            {
-                uint32_t data = buffer << 8 >> 8;
-                if (data != 0)
-                {
-                    cout << hex << "NOP: data= 0x" << data << dec << endl;
-                }
-                else
-                {
-                    cout << "NOP" << endl;
-                }
-                break;
-            }
-
-            case GE_VADDR:
-            {
-                uint32_t data = buffer << 8 >> 8;
-                if (data != 0)
-                {
-                    vertexAddr = data;
-                    cout << "VADDR: " << data << endl;
-                }
-                break;
-            }
-
-            case GE_IADDR:
-            {
-                uint32_t data = buffer << 8 >> 8;
-                if (data != 0)
-                {
-                    indexAddr = data;
-                    cout << "IADDR: " << data << endl;
-                }
-                break;
-            }
-
-            case GE_PRIM:
-            {
-                uint32_t count = buffer & 0xFFFF;
-                uint32_t type = (buffer >> 16) & 7;
-
-                static const char* types[8] =
-                {
-                    "POINTS",
-                    "LINES",
-                    "LINE_STRIP",
-                    "TRIANGLES",
-                    "TRIANGLE_STRIP",
-                    "TRIANGLE_FAN",
-                    "RECTANGLES",
-                    "CONTINUE_PREVIOUS",
-                };
-
-                cout << "DRAW PRIM \"" << (type < 7 ? types[type] : "INVALID") << "\" count= " << count << " vaddr= " << vertexAddr << endl;
-
-                break;
-            }
-
-            case GE_JUMP:
-            {
-                uint32_t addr = buffer << 8 >> 8;
-                returnAddr.push_back(gpu_offset);
-                gpu_offset = addr;
-                cout << "Jump to: " << hex << "0x" << addr << dec << endl;
-                break;
-            }
-            case GE_CALL:
-            {
-                uint32_t addr = buffer << 8 >> 8;
-                returnAddr.push_back(gpu_offset);
-                gpu_offset = addr;
-                cout << "Call to: " << hex << "0x" << addr << dec << endl;
-                break;
-            }
-            case GE_RET:
-            {
-                if(returnAddr.size() > 0)
-                {
-                    uint32_t addr = returnAddr.back();
-                    returnAddr.pop_back();
-                    gpu_offset = addr;
-                    cout << "Return to: " << hex << "0x" << addr << dec << endl;
-                }
-                else
-                {
-                    end = true;
-                }
-
-
-                break;
-            }
-
-            case GE_BASE:
-            {
-                uint32_t addr = buffer << 8 >> 8;
-                cout << "Set base addr to: " << hex << "0x" << addr << dec << endl;
-                break;
-            }
-
-            case GE_VERTEXTYPE:
-            {
-                uint32_t op = buffer;
-                cout << "SetVertexType: ";
-
-                bool through = (op & GE_VTYPE_THROUGH_MASK) == GE_VTYPE_THROUGH;
-                int tc = (op & GE_VTYPE_TC_MASK) >> GE_VTYPE_TC_SHIFT;
-                int col = (op & GE_VTYPE_COL_MASK) >> GE_VTYPE_COL_SHIFT;
-                int nrm = (op & GE_VTYPE_NRM_MASK) >> GE_VTYPE_NRM_SHIFT;
-                int pos = (op & GE_VTYPE_POS_MASK) >> GE_VTYPE_POS_SHIFT;
-                int weight = (op & GE_VTYPE_WEIGHT_MASK) >> GE_VTYPE_WEIGHT_SHIFT;
-                int weightCount = ((op & GE_VTYPE_WEIGHTCOUNT_MASK) >> GE_VTYPE_WEIGHTCOUNT_SHIFT) + 1;
-                int morphCount = (op & GE_VTYPE_MORPHCOUNT_MASK) >> GE_VTYPE_MORPHCOUNT_SHIFT;
-                int idx = (op & GE_VTYPE_IDX_MASK) >> GE_VTYPE_IDX_SHIFT;
-
-                static const char* colorNames[] = {
-                    NULL,
-                    "unsupported1",
-                    "unsupported2",
-                    "unsupported3",
-                    "BGR 565",
-                    "ABGR 1555",
-                    "ABGR 4444",
-                    "ABGR 8888",
-                };
-                static const char* typeNames[] = {
-                    NULL,
-                    "u8",
-                    "u16",
-                    "float",
-                };
-                static const char* typeNamesI[] = {
-                    NULL,
-                    "u8",
-                    "u16",
-                    "u32",
-                };
-                static const char* typeNamesS[] = {
-                    NULL,
-                    "s8",
-                    "s16",
-                    "float",
-                };
-
-                if (through)
-                    cout << "through, ";
-                if (typeNames[tc])
-                    cout << typeNames[tc] << " texcoords, ";
-
-                if (colorNames[col])
-                    cout << colorNames[col] << " colors, ";
-
-                if (typeNames[nrm])
-                    cout << typeNamesS[nrm] << " normals, ";
-
-                if (typeNames[pos])
-                    cout << typeNamesS[pos] << " positions, ";
-
-                if (typeNames[weight])
-                    cout << typeNames[weight] << " weights " << weightCount << ", ";
-                else if (weightCount > 1)
-                    cout << "unknown weights (%d), " << weightCount;
-
-                if (morphCount > 0)
-                    cout << morphCount << " morphs, ";
-
-                if (typeNamesI[idx])
-                    cout << typeNamesI[idx] << " indexes";
 
                 cout << endl;
 
-                break;
-            }
-            
-            case GE_TEXTUREMAPENABLE:
-            {
-                uint32_t flag = buffer << 8 >> 8;
-                cout << "Texture map enable: " << hex << flag << dec << endl;
-                break;
+                for (uint32_t instr : unkownInstr)
+                {
+                    cout << "Unknown istruction found: 0x" << hex << instr << dec << endl;
+                }
+
+                cout << endl;
             }
 
-            case GE_WORLDMATRIXNUMBER:
-            {
-                /* PPSSPP Source
-                if (data & ~0xF)
-                    snprintf(buffer, bufsize, "World # %i (extra %x)", data & 0xF, data);
-                else
-                    snprintf(buffer, bufsize, "World # %i", data & 0xF);
-                */
-                uint32_t f = buffer << 8;
-
-                cout.setf(ios::fixed, ios::floatfield);
-                cout.setf(ios::showpoint);
-                cout << "World: # " << (int)Binary::u32_to_float(f) << endl;
-
-                break;
-            }
-
-            case GE_WORLDMATRIXDATA:
-            {
-                uint32_t f = buffer << 8;
-
-                cout.setf(ios::fixed, ios::floatfield);
-                cout.setf(ios::showpoint);
-                cout << "World matrix set: " << Binary::u32_to_float(f) << endl;
-
-                break;
-            }
-
-            case GE_TEXSCALEU:
-            {
-                uint32_t f = buffer << 8;
-
-                cout.setf(ios::fixed, ios::floatfield);
-                cout.setf(ios::showpoint);
-                cout << "Texture U scale: " << Binary::u32_to_float(f) << endl;
-
-                break;
-            }
-
-            case GE_TEXSCALEV:
-            {
-                uint32_t f = buffer << 8;
-
-                cout.setf(ios::fixed, ios::floatfield);
-                cout.setf(ios::showpoint);
-                cout << "Texture V scale: " << Binary::u32_to_float(f) << endl;
-
-                break;
-            }
-
-            case GE_TEXOFFSETU:
-            {
-                uint32_t f = buffer << 8;
-
-                cout.setf(ios::fixed, ios::floatfield);
-                cout.setf(ios::showpoint);
-                cout << "Texture U offset: " << Binary::u32_to_float(f) << endl;
-
-                break;
-            }
-
-            case GE_TEXOFFSETV:
-            {
-                uint32_t f = buffer << 8;
-
-                cout.setf(ios::fixed, ios::floatfield);
-                cout.setf(ios::showpoint);
-                cout << "Texture V offset: " << Binary::u32_to_float(f) << endl;
-
-                break;
-            }
-
-            case GE_MATERIALAMBIENT:
-            {
-                uint32_t color = buffer << 8 >> 8;
-                cout << "Material ambient color: 0x" << hex << color << dec << endl;
-            }
-            case GE_MATERIALALPHA:
-            {
-                uint32_t color = buffer << 8 >> 8;
-
-                cout.setf(ios::fixed, ios::floatfield);
-                cout.setf(ios::showpoint);
-                cout << "Material alpha color: 0x" << hex << color << dec << endl;
-
-                break;
-            }
-
-            }
-
-
-            buffer = Binary::get_uint32(gxx, gpu_offset);
-        }
-        
-        cout << endl;
-
-        for (uint32_t instr : unkownInstr)
-        {
-            cout << "Unknown istruction found: 0x" << hex << instr << dec << endl;
         }
 
-        cout << endl;
+
+    }
+
+
+    {}
+    {
+        //uint32_t offset_1 = Binary::get_uint32(gxx, section_c + 0x10);
+        //uint32_t offset_2 = Binary::get_uint32(gxx, offset_1);
+        //uint32_t gpu_offset = Binary::get_uint32(gxx, offset_2);
+
+        //uint32_t buffer = 0x0;
+        //buffer = Binary::get_uint32(gxx, gpu_offset);
+
+        //vector<uint32_t> unkownInstr;
+
+        //uint32_t vertexAddr;
+        //uint32_t indexAddr;
+        //vector<uint32_t> returnAddr;
+        //bool end = false;
+        //
+        //while (!end)
+        //{
+        //    ///We go over the most crucial GPU instructions for us
+        //    gpu_offset += 0x4;
+
+        //    switch (buffer >> 24)
+        //    {
+        //    default:
+        //    {
+        //        uint32_t data = buffer >> 24;
+        //        //cout << "---UNKNOWN: " << hex << "0x" << data << dec << endl;
+        //        if (!std::count(unkownInstr.begin(), unkownInstr.end(), data))
+        //        {
+        //            unkownInstr.push_back(data);
+        //        }
+        //    }
+
+        //    case GE_NOP:
+        //    {
+        //        uint32_t data = buffer << 8 >> 8;
+        //        if (data != 0)
+        //        {
+        //            cout << hex << "NOP: data= 0x" << data << dec << endl;
+        //        }
+        //        else
+        //        {
+        //            cout << "NOP" << endl;
+        //        }
+        //        break;
+        //    }
+
+        //    case GE_VADDR:
+        //    {
+        //        uint32_t data = buffer << 8 >> 8;
+        //        if (data != 0)
+        //        {
+        //            vertexAddr = data;
+        //            cout << "VADDR: " << data << endl;
+        //        }
+        //        break;
+        //    }
+
+        //    case GE_IADDR:
+        //    {
+        //        uint32_t data = buffer << 8 >> 8;
+        //        if (data != 0)
+        //        {
+        //            indexAddr = data;
+        //            cout << "IADDR: " << data << endl;
+        //        }
+        //        break;
+        //    }
+
+        //    case GE_PRIM:
+        //    {
+        //        uint32_t count = buffer & 0xFFFF;
+        //        uint32_t type = (buffer >> 16) & 7;
+
+        //        static const char* types[8] =
+        //        {
+        //            "POINTS",
+        //            "LINES",
+        //            "LINE_STRIP",
+        //            "TRIANGLES",
+        //            "TRIANGLE_STRIP",
+        //            "TRIANGLE_FAN",
+        //            "RECTANGLES",
+        //            "CONTINUE_PREVIOUS",
+        //        };
+
+        //        cout << "DRAW PRIM \"" << (type < 7 ? types[type] : "INVALID") << "\" count= " << count << " vaddr= " << vertexAddr << endl;
+
+        //        break;
+        //    }
+
+        //    case GE_JUMP:
+        //    {
+        //        uint32_t addr = buffer << 8 >> 8;
+        //        returnAddr.push_back(gpu_offset);
+        //        gpu_offset = addr;
+        //        cout << "Jump to: " << hex << "0x" << addr << dec << endl;
+        //        break;
+        //    }
+        //    case GE_CALL:
+        //    {
+        //        uint32_t addr = buffer << 8 >> 8;
+        //        returnAddr.push_back(gpu_offset);
+        //        gpu_offset = addr;
+        //        cout << "Call to: " << hex << "0x" << addr << dec << endl;
+        //        break;
+        //    }
+        //    case GE_RET:
+        //    {
+        //        if(returnAddr.size() > 0)
+        //        {
+        //            uint32_t addr = returnAddr.back();
+        //            returnAddr.pop_back();
+        //            gpu_offset = addr;
+        //            cout << "Return to: " << hex << "0x" << addr << dec << endl;
+        //        }
+        //        else
+        //        {
+        //            end = true;
+        //        }
+
+
+        //        break;
+        //    }
+
+        //    case GE_BASE:
+        //    {
+        //        uint32_t addr = buffer << 8 >> 8;
+        //        cout << "Set base addr to: " << hex << "0x" << addr << dec << endl;
+        //        break;
+        //    }
+
+        //    case GE_VERTEXTYPE:
+        //    {
+        //        uint32_t op = buffer;
+        //        cout << "SetVertexType: ";
+
+        //        bool through = (op & GE_VTYPE_THROUGH_MASK) == GE_VTYPE_THROUGH;
+        //        int tc = (op & GE_VTYPE_TC_MASK) >> GE_VTYPE_TC_SHIFT;
+        //        int col = (op & GE_VTYPE_COL_MASK) >> GE_VTYPE_COL_SHIFT;
+        //        int nrm = (op & GE_VTYPE_NRM_MASK) >> GE_VTYPE_NRM_SHIFT;
+        //        int pos = (op & GE_VTYPE_POS_MASK) >> GE_VTYPE_POS_SHIFT;
+        //        int weight = (op & GE_VTYPE_WEIGHT_MASK) >> GE_VTYPE_WEIGHT_SHIFT;
+        //        int weightCount = ((op & GE_VTYPE_WEIGHTCOUNT_MASK) >> GE_VTYPE_WEIGHTCOUNT_SHIFT) + 1;
+        //        int morphCount = (op & GE_VTYPE_MORPHCOUNT_MASK) >> GE_VTYPE_MORPHCOUNT_SHIFT;
+        //        int idx = (op & GE_VTYPE_IDX_MASK) >> GE_VTYPE_IDX_SHIFT;
+
+        //        static const char* colorNames[] = {
+        //            NULL,
+        //            "unsupported1",
+        //            "unsupported2",
+        //            "unsupported3",
+        //            "BGR 565",
+        //            "ABGR 1555",
+        //            "ABGR 4444",
+        //            "ABGR 8888",
+        //        };
+        //        static const char* typeNames[] = {
+        //            NULL,
+        //            "u8",
+        //            "u16",
+        //            "float",
+        //        };
+        //        static const char* typeNamesI[] = {
+        //            NULL,
+        //            "u8",
+        //            "u16",
+        //            "u32",
+        //        };
+        //        static const char* typeNamesS[] = {
+        //            NULL,
+        //            "s8",
+        //            "s16",
+        //            "float",
+        //        };
+
+        //        if (through)
+        //            cout << "through, ";
+        //        if (typeNames[tc])
+        //            cout << typeNames[tc] << " texcoords, ";
+
+        //        if (colorNames[col])
+        //            cout << colorNames[col] << " colors, ";
+
+        //        if (typeNames[nrm])
+        //            cout << typeNamesS[nrm] << " normals, ";
+
+        //        if (typeNames[pos])
+        //            cout << typeNamesS[pos] << " positions, ";
+
+        //        if (typeNames[weight])
+        //            cout << typeNames[weight] << " weights " << weightCount << ", ";
+        //        else if (weightCount > 1)
+        //            cout << "unknown weights (%d), " << weightCount;
+
+        //        if (morphCount > 0)
+        //            cout << morphCount << " morphs, ";
+
+        //        if (typeNamesI[idx])
+        //            cout << typeNamesI[idx] << " indexes";
+
+        //        cout << endl;
+
+        //        break;
+        //    }
+        //    
+        //    case GE_TEXTUREMAPENABLE:
+        //    {
+        //        uint32_t flag = buffer << 8 >> 8;
+        //        cout << "Texture map enable: " << hex << flag << dec << endl;
+        //        break;
+        //    }
+
+        //    case GE_WORLDMATRIXNUMBER:
+        //    {
+        //        /* PPSSPP Source
+        //        if (data & ~0xF)
+        //            snprintf(buffer, bufsize, "World # %i (extra %x)", data & 0xF, data);
+        //        else
+        //            snprintf(buffer, bufsize, "World # %i", data & 0xF);
+        //        */
+        //        uint32_t f = buffer << 8;
+
+        //        cout.setf(ios::fixed, ios::floatfield);
+        //        cout.setf(ios::showpoint);
+        //        cout << "World: # " << (int)Binary::u32_to_float(f) << endl;
+
+        //        break;
+        //    }
+
+        //    case GE_WORLDMATRIXDATA:
+        //    {
+        //        uint32_t f = buffer << 8;
+
+        //        cout.setf(ios::fixed, ios::floatfield);
+        //        cout.setf(ios::showpoint);
+        //        cout << "World matrix set: " << Binary::u32_to_float(f) << endl;
+
+        //        break;
+        //    }
+
+        //    case GE_TEXSCALEU:
+        //    {
+        //        uint32_t f = buffer << 8;
+
+        //        cout.setf(ios::fixed, ios::floatfield);
+        //        cout.setf(ios::showpoint);
+        //        cout << "Texture U scale: " << Binary::u32_to_float(f) << endl;
+
+        //        break;
+        //    }
+
+        //    case GE_TEXSCALEV:
+        //    {
+        //        uint32_t f = buffer << 8;
+
+        //        cout.setf(ios::fixed, ios::floatfield);
+        //        cout.setf(ios::showpoint);
+        //        cout << "Texture V scale: " << Binary::u32_to_float(f) << endl;
+
+        //        break;
+        //    }
+
+        //    case GE_TEXOFFSETU:
+        //    {
+        //        uint32_t f = buffer << 8;
+
+        //        cout.setf(ios::fixed, ios::floatfield);
+        //        cout.setf(ios::showpoint);
+        //        cout << "Texture U offset: " << Binary::u32_to_float(f) << endl;
+
+        //        break;
+        //    }
+
+        //    case GE_TEXOFFSETV:
+        //    {
+        //        uint32_t f = buffer << 8;
+
+        //        cout.setf(ios::fixed, ios::floatfield);
+        //        cout.setf(ios::showpoint);
+        //        cout << "Texture V offset: " << Binary::u32_to_float(f) << endl;
+
+        //        break;
+        //    }
+
+        //    case GE_MATERIALAMBIENT:
+        //    {
+        //        uint32_t color = buffer << 8 >> 8;
+        //        cout << "Material ambient color: 0x" << hex << color << dec << endl;
+        //    }
+        //    case GE_MATERIALALPHA:
+        //    {
+        //        uint32_t color = buffer << 8 >> 8;
+
+        //        cout.setf(ios::fixed, ios::floatfield);
+        //        cout.setf(ios::showpoint);
+        //        cout << "Material alpha color: 0x" << hex << color << dec << endl;
+
+        //        break;
+        //    }
+
+        //    }
+
+
+        //    buffer = Binary::get_uint32(gxx, gpu_offset);
+        //}
+        //
+        //cout << endl;
+
+        //for (uint32_t instr : unkownInstr)
+        //{
+        //    cout << "Unknown istruction found: 0x" << hex << instr << dec << endl;
+        //}
+
+        //cout << endl;
     }
 
     system("pause");
