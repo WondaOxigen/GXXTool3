@@ -1,6 +1,7 @@
 #include <iostream>
 #include "Binary.hpp"
 #include "GE.hpp"
+#include "GEMath.hpp"
 #include "ge_constants.hpp"
 
 using namespace std;
@@ -13,9 +14,13 @@ void debug_log(string s)
     cout << s << endl;
 }
 
+uint32_t bgr_to_rgba(uint16_t bgr565);
+float rad2deg(float angle);
+
 int main(int argc, char* argv[])
 {
     cout << "GXXTool3 by Owocek and wondaoxigen" << endl << endl;
+
     if (argc < 2) 
     {
         // Wonda: checking if we have a file 
@@ -23,6 +28,7 @@ int main(int argc, char* argv[])
         system("pause");
         return 0;
     }
+
     //string file = "chr01_01_01_1.gxx";
     string file = argv[1];
     cout << "Reading file " << file << endl << endl;
@@ -356,10 +362,13 @@ int main(int argc, char* argv[])
             uint32_t frameloop = Binary::get_float(gxx, block_pointer + (i * 0x10) + 0xC);
 
             uint32_t anim_data = Binary::get_uint32(gxx, anim_pointer);
+            uint32_t boneAmount = Binary::get_uint32(gxx, section_c + 0xC + 2 * 0x8);
 
-            cout << "Anim ptr: 0x" << std::hex << anim_pointer << " (anim data at: 0x" << anim_data << std::dec << "), Frames: " << frames << " Loop: " << frameloop << " Framerate: " << framerate << endl;
+            for (int i = 0; i < boneAmount; i++)
+            { 
+                cout << "Anim ptr: 0x" << std::hex << anim_pointer << " (anim data at: 0x" << anim_data << std::dec << "), Frames: " << frames << " Loop: " << frameloop << " Framerate: " << framerate << endl;
 
-            {
+                bool end = false;
                 uint32_t gpu_offset = anim_data;
 
                 uint32_t buffer = 0x0;
@@ -370,7 +379,13 @@ int main(int argc, char* argv[])
                 uint32_t vertexAddr;
                 uint32_t indexAddr;
                 vector<uint32_t> returnAddr;
-                bool end = false;
+
+                cout << endl << "Amount of bones: " << subsection_size << endl;
+
+                /// VERTEX TYPE
+                string texcoord_type = "NULL";
+                string color_type = "NULL";
+                string position_type = "NULL";
 
                 while (!end)
                 {
@@ -442,8 +457,62 @@ int main(int argc, char* argv[])
                             "CONTINUE_PREVIOUS",
                         };
 
-                        cout << "DRAW PRIM \"" << (type < 7 ? types[type] : "INVALID") << "\" count= " << count << " vaddr= " << vertexAddr << endl;
+                        cout << "DRAW PRIM \"" << (type < 7 ? types[type] : "INVALID") << "\" count= " << count << " vaddr= " << hex << vertexAddr << dec << endl;
+                        
+                        cout << "VERTEX DATA:" << endl;
 
+                        int block_size = 0x00;
+                        if (texcoord_type != "NULL")
+                            block_size += 0x08;
+                        if (color_type != "NULL")
+                            block_size += 0x04;
+                        if (position_type != "NULL")
+                            block_size += 0x0C;
+
+                        for (int i = 0; i < count; i++)
+                        {
+                            cout << "  ";
+
+                            uint32_t offset = vertexAddr + block_size * i;
+
+                            if (texcoord_type == "float")
+                            {
+                                float U = Binary::get_float(gxx, offset);
+                                offset += 0x04;
+                                float V = Binary::get_float(gxx, offset);
+                                offset += 0x04;
+                                cout << "UV:(" << U << ", " << V << ") ";
+                            }
+
+                            if (color_type == "BGR 565")
+                            {
+                                uint16_t color = Binary::get_uint16(gxx, offset);
+                                offset += 0x04;
+                                cout << "color:0x" << hex << color << " ";
+                            }
+                            else if (color_type == "ABGR 8888")
+                            {
+                                uint32_t color = Binary::get_uint32(gxx, offset);
+                                offset += 0x04;
+                                cout << "color:0x" << hex << color << " ";
+                            }
+
+                            if (position_type == "float")
+                            {
+                                float x = Binary::get_float(gxx, offset);
+                                offset += 0x04;
+                                float y = Binary::get_float(gxx, offset);
+                                offset += 0x04;
+                                float z = Binary::get_float(gxx, offset);
+                                offset += 0x04;
+
+                                cout << "xyz:(" << x << ", " << y << ", " << z << ") ";
+                            }
+                            //cout << "offset 0x" << hex << offset;
+                            cout << endl;
+                        }
+                        
+                        vertexAddr += block_size * count;
                         break;
                     }
 
@@ -465,7 +534,7 @@ int main(int argc, char* argv[])
                     }
                     case GE_RET:
                     {
-                        if (returnAddr.size() > 0)
+                        if (returnAddr.size() > 0 )
                         {
                             uint32_t addr = returnAddr.back();
                             returnAddr.pop_back();
@@ -490,6 +559,12 @@ int main(int argc, char* argv[])
 
                     case GE_VERTEXTYPE:
                     {
+                        ///Clear vertex type
+                        texcoord_type = "NULL";
+                        color_type = "NULL";
+                        position_type = "NULL";
+
+
                         uint32_t op = buffer;
                         cout << "SetVertexType: ";
 
@@ -503,8 +578,8 @@ int main(int argc, char* argv[])
                         int morphCount = (op & GE_VTYPE_MORPHCOUNT_MASK) >> GE_VTYPE_MORPHCOUNT_SHIFT;
                         int idx = (op & GE_VTYPE_IDX_MASK) >> GE_VTYPE_IDX_SHIFT;
 
-                        static const char* colorNames[] = {
-                            NULL,
+                        string colorNames[] = {
+                            "NULL",
                             "unsupported1",
                             "unsupported2",
                             "unsupported3",
@@ -513,20 +588,20 @@ int main(int argc, char* argv[])
                             "ABGR 4444",
                             "ABGR 8888",
                         };
-                        static const char* typeNames[] = {
-                            NULL,
+                        string typeNames[] = {
+                            "NULL",
                             "u8",
                             "u16",
                             "float",
                         };
-                        static const char* typeNamesI[] = {
-                            NULL,
+                        string typeNamesI[] = {
+                            "NULL",
                             "u8",
                             "u16",
                             "u32",
                         };
-                        static const char* typeNamesS[] = {
-                            NULL,
+                        string typeNamesS[] = {
+                            "NULL",
                             "s8",
                             "s16",
                             "float",
@@ -534,30 +609,35 @@ int main(int argc, char* argv[])
 
                         if (through)
                             cout << "through, ";
-                        if (typeNames[tc])
+                        if (typeNames[tc] != "NULL")
                             cout << typeNames[tc] << " texcoords, ";
+                            texcoord_type = typeNames[tc];
 
-                        if (colorNames[col])
+                        if (colorNames[col] != "NULL")
                             cout << colorNames[col] << " colors, ";
+                            color_type = colorNames[col];
 
-                        if (typeNames[nrm])
+                        if (typeNames[nrm] != "NULL")
                             cout << typeNamesS[nrm] << " normals, ";
 
-                        if (typeNames[pos])
+                        if (typeNames[pos] != "NULL")
                             cout << typeNamesS[pos] << " positions, ";
+                            position_type = typeNamesS[pos];
 
-                        if (typeNames[weight])
+                        if (typeNames[weight] != "NULL")
                             cout << typeNames[weight] << " weights " << weightCount << ", ";
                         else if (weightCount > 1)
-                            cout << "unknown weights (%d), " << weightCount;
+                            cout << "unknown weights " << weightCount << ", ";
 
                         if (morphCount > 0)
                             cout << morphCount << " morphs, ";
 
-                        if (typeNamesI[idx])
+                        if (typeNamesI[idx] != "NULL")
                             cout << typeNamesI[idx] << " indexes";
 
                         cout << endl;
+
+                        
 
                         break;
                     }
@@ -577,22 +657,64 @@ int main(int argc, char* argv[])
                         else
                             snprintf(buffer, bufsize, "World # %i", data & 0xF);
                         */
-                        uint32_t f = buffer << 8;
+                        int f = buffer << 8;
 
                         cout.setf(ios::fixed, ios::floatfield);
                         cout.setf(ios::showpoint);
                         cout << "World: # " << (int)Binary::u32_to_float(f) << endl;
 
+                        BoneMatrix matrix;
+
+                        matrix.basisX_x = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset) << 8);
+                        matrix.basisX_y = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset + 0x04) << 8);
+                        matrix.basisX_z = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset + 0x08) << 8);
+                                                                                                          
+                        matrix.basisY_x = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset + 0x0c) << 8);
+                        matrix.basisY_y = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset + 0x10) << 8);
+                        matrix.basisY_z = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset + 0x14) << 8);
+                                                                                                        
+                        matrix.basisZ_x = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset + 0x18) << 8);
+                        matrix.basisZ_y = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset + 0x1C) << 8);
+                        matrix.basisZ_z = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset + 0x20) << 8);
+
+                        matrix.translation_x = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset + 0x24) << 8);
+                        matrix.translation_y = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset + 0x28) << 8);
+                        matrix.translation_z = Binary::u32_to_float(Binary::get_uint32(gxx, gpu_offset + 0x2C) << 8);
+
+                        /*cout << endl;
+                        cout << "matrix 1: " << hex << Binary::get_uint32(gxx, gpu_offset + 0x04) << dec << 8 << endl;
+                        cout << "matrix 2: " <<  hex << Binary::get_uint32(gxx, gpu_offset + 0x08) << dec  << 8 << endl;
+                        cout << "matrix 3: " <<  hex << Binary::get_uint32(gxx, gpu_offset + 0x0c) << dec  << 8 << endl;
+                                           
+                        cout << "matrix 4: " <<  hex << Binary::get_uint32(gxx, gpu_offset + 0x10) << dec  << 8 << endl;
+                        cout << "matrix 5: " <<  hex << Binary::get_uint32(gxx, gpu_offset + 0x14) << dec  << 8 << endl;
+                        cout << "matrix 6: " <<  hex << Binary::get_uint32(gxx, gpu_offset + 0x18) << dec  << 8 << endl;
+                                           
+                        cout << "matrix 7: " <<  hex << Binary::get_uint32(gxx, gpu_offset + 0x1C) << dec  << 8 << endl;
+                        cout << "matrix 8: " <<  hex << Binary::get_uint32(gxx, gpu_offset + 0x20) << dec  << 8 << endl;
+                        cout << "matrix 9: " <<  hex << Binary::get_uint32(gxx, gpu_offset + 0x24) << dec  << 8 << endl;
+                        
+                        cout << "matrix 10: " <<  hex << Binary::get_uint32(gxx, gpu_offset + 0x28) << dec  << 8 << endl;
+                        cout << "matrix 11: " <<  hex << Binary::get_uint32(gxx, gpu_offset + 0x2C) << dec  << 8 << endl;
+                        cout << "matrix 12: " <<  hex << Binary::get_uint32(gxx, gpu_offset + 0x30) << dec  << 8 << endl;
+                        cout << endl;*/
+
+
+                        cout << "xyz: (" << matrix.translation_x << ", " << matrix.translation_y << ", " << matrix.translation_z << ") " << endl;
+                        cout << "Scale xyz: (" << matrix.get_scale_x() << ", " << matrix.get_scale_y() << ", " << matrix.get_scale_z() << ") " << endl;
+                        cout << "Rotation rad xyz: (" << matrix.get_rotation().x << ", " << matrix.get_rotation().y << ", " << matrix.get_rotation().z << ") " << endl;
+                        cout << "Rotation deg xyz: (" << rad2deg(matrix.get_rotation().x) << ", " << rad2deg(matrix.get_rotation().y) << ", " << rad2deg(matrix.get_rotation().z) << ") " << endl;
                         break;
                     }
 
                     case GE_WORLDMATRIXDATA:
                     {
-                        uint32_t f = buffer << 8;
+                        uint32_t data = buffer << 8;
+                        float f = Binary::u32_to_float(data);
 
                         cout.setf(ios::fixed, ios::floatfield);
                         cout.setf(ios::showpoint);
-                        cout << "World matrix set: " << Binary::u32_to_float(f) << endl;
+                        cout << "World matrix set: " << f << endl;
 
                         break;
                     }
@@ -998,4 +1120,22 @@ int main(int argc, char* argv[])
 
     system("pause");
     return 0;
+}
+
+uint32_t bgr_to_rgba(uint16_t bgr565)
+{
+    /// bgr_to_rgba by Owocek
+    uint8_t b = bgr565 >> 11;
+    uint8_t g = uint16_t(bgr565 << 5) >> 10;
+    uint8_t r = uint16_t(bgr565 << 11) >> 11;
+
+    uint8_t red = (r * 527 + 23) >> 6;
+    uint8_t green = (g * 259 + 33) >> 6;
+    uint8_t blue = (b * 527 + 23) >> 6;
+
+    return (uint32_t(red) << 24) + (uint32_t(green) << 16) + (uint32_t(blue) << 8) + 0xFF;
+}
+
+float rad2deg(float angle) {
+    return angle * 180.0 / Math_PI;
 }

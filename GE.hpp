@@ -269,6 +269,9 @@ struct GPUStateCache
 	uint32_t indexAddr;
 	uint32_t offsetAddr;
 
+	
+
+
 	//uint64_t dirty;
 
 	//bool textureFullAlpha;
