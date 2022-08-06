@@ -118,8 +118,8 @@ int main(int argc, char* argv[])
         uint32_t block_pointer = Binary::get_uint32(gxx, section_c + 0x10);
         uint32_t blocks = Binary::get_uint32(gxx, section_c + 0x14);
 
-        cout << dye::black_on_light_aqua("Blocks start at:") << " 0x" << hex << block_pointer << dec << ", " << blocks << " blocks" << endl;
         cout << endl;
+        cout << dye::black_on_light_aqua("Blocks start at:") << " 0x" << hex << block_pointer << dec << ", " << blocks << " blocks" << endl;
 
         for (int i = 0; i < blocks; i++)
         {
@@ -229,7 +229,7 @@ int main(int argc, char* argv[])
 
                     cout << "DRAW PRIM \"" << (type < 7 ? types[type] : "INVALID") << "\" count= " << count << " vaddr= " << hex << vertexAddr << dec << endl;
                         
-                    cout << dye::black_on_bright_white("  VERTEX DATA:") << endl;
+                    cout << dye::black_on_bright_white("VERTEX DATA:") << endl;
 
                     int block_size = 0x00;
                     if (texcoord_type != "NULL")
@@ -258,13 +258,13 @@ int main(int argc, char* argv[])
                         {
                             uint16_t color = Binary::get_uint16(gxx, offset);
                             offset += 0x04;
-                            cout << dye::light_purple("argb:") << "0x" << hex << color << " " << dec;
+                            cout << dye::light_purple("bgr:") << "0x" << hex << color << " " << dec;
                         }
                         else if (color_type == "ABGR 8888")
                         {
                             uint32_t color = Binary::get_uint32(gxx, offset);
                             offset += 0x04;
-                            cout << dye::light_purple("argb:") << "0x" << hex << color << " " << dec;
+                            cout << dye::light_purple("abgr:") << "0x" << hex << color << " " << dec;
                         }
 
                         if (position_type == "float")
